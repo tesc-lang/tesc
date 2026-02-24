@@ -1,0 +1,10 @@
+[package]
+name = "tesc-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+pest = "2.8.6"
+pest_derive = "2.8.6"
+thiserror = "2.0.18"
