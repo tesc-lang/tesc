@@ -1,10 +1,7 @@
 use pest::iterators::Pair;
 
 use crate::{
-    environment::Environment,
-    parser::Rule,
-    statement::{expression::ExpressionKind, test::Test},
-    test_error::TestError,
+    environment::Environment, parser::Rule, statement::test::Test, test_error::TestError,
     TescOptions,
 };
 
@@ -34,19 +31,9 @@ pub enum StatementKind {
     Block(Block),
 }
 
-impl Statement {
-    pub fn expression(kind: ExpressionKind) -> Self {
-        Self {
-            kind: StatementKind::Expression(Expression { kind }),
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum Value {
     String(String),
-
-    TestResult(Result<(), TestError>),
 
     Void,
 }

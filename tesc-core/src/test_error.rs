@@ -9,6 +9,7 @@ pub enum TestError {
         actual: String,
         expected: String,
     },
+    Multiple(Vec<TestError>),
 }
 
 impl Display for TestError {
@@ -22,6 +23,11 @@ impl Display for TestError {
                 writeln!(f, "test `{test}` failed: Output missmatch")?;
                 writeln!(f, "Recieved `{actual}`")?;
                 writeln!(f, "Expected `{expected}`")?;
+            }
+            TestError::Multiple(test_errors) => {
+                for error in test_errors {
+                    writeln!(f, "{error}")?;
+                }
             }
         }
         Ok(())

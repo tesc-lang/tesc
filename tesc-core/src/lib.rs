@@ -1,9 +1,8 @@
-mod environment;
+pub mod environment;
 mod module;
 pub mod parser;
 mod statement;
 pub mod test_error;
-mod r#type;
 
 pub struct TescOptions;
 

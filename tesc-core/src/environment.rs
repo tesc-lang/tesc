@@ -3,25 +3,21 @@ use std::{
     process::Stdio,
 };
 
-use crate::{r#type::Type, statement::Statement};
+pub struct Frame(Vec<Item>);
+
+#[derive(Clone, Debug)]
+pub enum Item {}
 
 pub struct Environment {
     pub test: Option<String>,
     pub child: Option<std::process::Child>,
-    stack: Vec<Frame>,
-
-    global_scope: Vec<Item>,
+    _stack: Vec<Frame>,
 }
 
-pub struct Frame;
-
-#[derive(Clone, Debug)]
-pub enum Item {
-    Function {
-        id: String,
-        arguments: Vec<Type>,
-        body: Vec<Statement>,
-    },
+impl Default for Environment {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Environment {
@@ -29,8 +25,7 @@ impl Environment {
         Self {
             test: None,
             child: None,
-            stack: Vec::new(),
-            global_scope: Vec::new(),
+            _stack: Vec::new(),
         }
     }
 
@@ -74,33 +69,4 @@ impl Environment {
             .read_to_string(buf)
             .unwrap();
     }
-
-    pub fn get_fn(&self, id: String, arguments: &[Type]) -> Result<Item, ()> {
-        for item in &self.global_scope {
-            match item {
-                Item::Function {
-                    id: fn_id,
-                    arguments: fn_arguments,
-                    ..
-                } => {
-                    if fn_id == &id && argument_eq(arguments, fn_arguments) {
-                        return Ok(item.clone());
-                    }
-                }
-            }
-        }
-        Err(())
-    }
-}
-
-fn argument_eq(args1: &[Type], args2: &[Type]) -> bool {
-    if args1.len() != args2.len() {
-        return false;
-    }
-    for (t1, t2) in args1.iter().zip(args2) {
-        if t1 != t2 {
-            return false;
-        }
-    }
-    true
 }

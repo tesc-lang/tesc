@@ -3,41 +3,45 @@ use pest::iterators::Pair;
 use crate::{
     environment::Environment,
     parser::Rule,
-    statement::{test::Test, Instruction, Statement, StatementKind},
+    statement::{Instruction, Statement, Value},
     test_error::TestError,
     TescOptions,
 };
 
 #[derive(Clone, Debug)]
 pub struct Module {
-    source: String,
     ast: Vec<Statement>,
 }
 
-impl Module {
-    pub fn parse(source: String, pair: Pair<Rule>) -> Module {
+impl Instruction for Module {
+    fn parse(pair: Pair<Rule>) -> Self {
         let mut ast = Vec::new();
         for pair in pair.into_inner() {
             if pair.as_rule() != Rule::EOI {
                 ast.push(Statement::parse(pair));
             }
         }
-        Module { source, ast }
+        Module { ast }
     }
 
-    pub fn eval(&self, opts: &TescOptions) -> Result<(), Vec<TestError>> {
+    fn eval(&self, opts: &TescOptions, _env: &mut Environment) -> Result<Value, TestError> {
         let mut failures = Vec::new();
-        let mut env = Environment::new();
         for node in &self.ast {
-            match node.eval(opts, &mut env) {
+            match node.eval(opts, _env) {
                 Ok(_) => (),
                 Err(e) => failures.push(e),
             }
         }
         if failures.is_empty() {
-            Ok(())
+            Ok(Value::Void)
         } else {
-            Err(failures)
+            Err(TestError::Multiple(failures))
         }
+    }
+}
+
+impl Module {
+    pub fn run(&self, _opts: &TescOptions, _env: &mut Environment) -> Result<Value, TestError> {
+        self.eval(_opts, _env)
     }
 }
