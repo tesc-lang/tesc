@@ -1,14 +1,16 @@
-use pest::Parser;
+use chumsky::prelude::*;
 
-use crate::module::Module;
+use crate::{
+    lexer::Token,
+    statement::{module::Module, Instruction, Spanned},
+};
 
-#[derive(pest_derive::Parser)]
-#[grammar = "grammar/grammar.pest"]
-pub struct TescParser;
+pub fn parse<'tokens, 'src>(
+    tokens: &'tokens [Spanned<Token<'src>>],
+    src_len: usize,
+) -> ParseResult<Spanned<Module>, Rich<'tokens, Token<'src>>> {
+    let eof_span: SimpleSpan = (src_len..src_len).into();
+    let token_stream = tokens.map(eof_span, |(t, s)| (t, s));
 
-pub fn parse(file_name: String) -> Result<Module, pest::error::Error<Rule>> {
-    let source = std::fs::read_to_string(&file_name).unwrap();
-
-    let mut pairs = TescParser::parse(Rule::module, &source)?;
-    Ok(Module::parse(file_name.clone(), pairs.next().unwrap()))
+    Module::parser().parse(token_stream)
 }

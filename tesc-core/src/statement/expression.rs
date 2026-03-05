@@ -1,71 +1,63 @@
-use pest::iterators::Pair;
+use chumsky::{
+    input::ValueInput,
+    prelude::{SimpleSpan, *},
+};
 
 use crate::{
     environment::Environment,
-    parser::Rule,
+    lexer::Token,
     statement::{
-        block::Block, builtin::Builtin, function_call::FunctionCall, string_literal::StringLiteral,
-        Instruction, Value,
+        block::Block, ident::Ident, method_call::MethodCall, string_literal::StringLiteral,
+        Instruction, ParserExtra, Spanned, Statement, Value,
     },
     test_error::TestError,
     TescOptions,
 };
 
 #[derive(Clone, Debug)]
-pub struct Expression {
-    pub kind: ExpressionKind,
-}
+pub enum Expression {
+    Block(Box<Block>),
+    // FunctionCall(FunctionCall),
+    // Builtin(Builtin),
+    MethodCall(Box<MethodCall>),
 
-#[derive(Clone, Debug)]
-pub enum ExpressionKind {
-    Block(Block),
-
-    FunctionCall(FunctionCall),
-    Builtin(Builtin),
-
+    Ident(Ident),
     StringLiteral(StringLiteral),
 }
 
-impl Instruction for Expression {
-    fn parse(pair: Pair<Rule>) -> Self {
-        let pair = pair.into_inner().next().unwrap();
-        match pair.as_rule() {
-            Rule::builtin => Self {
-                kind: ExpressionKind::Builtin(Builtin::parse(pair)),
-            },
-            Rule::function_call => Self {
-                kind: ExpressionKind::FunctionCall(FunctionCall::parse(pair)),
-            },
+impl Expression {
+    pub fn parser<'tokens, 'src: 'tokens, I>(
+        stmt: impl Parser<'tokens, I, Spanned<Statement>, ParserExtra<'tokens, 'src>> + Clone + 'tokens,
+    ) -> impl Parser<'tokens, I, Spanned<Self>, ParserExtra<'tokens, 'src>> + Clone
+    where
+        Self: std::marker::Sized,
+        I: ValueInput<'tokens, Token = Token<'src>, Span = SimpleSpan>,
+    {
+        recursive(|expr| {
+            let string =
+                StringLiteral::parser().map(|(string, _)| Expression::StringLiteral(string));
+            let ident = Ident::parser().map(|(ident, _)| Expression::Ident(ident));
 
-            Rule::string_literal => Self {
-                kind: ExpressionKind::StringLiteral(StringLiteral::parse(pair)),
-            },
+            let block = Block::parser(stmt, expr.clone())
+                .map(|(block, _)| Expression::Block(Box::new(block)));
 
-            Rule::block => Self {
-                kind: ExpressionKind::Block(Block::parse(pair)),
-            },
+            let base = choice((string, ident, block)).map_with(|expr, e| (expr, e.span()));
 
-            Rule::module
-            | Rule::EOI
-            | Rule::WHITESPACE
-            | Rule::alpha
-            | Rule::digit
-            | Rule::ident
-            | Rule::arguments
-            | Rule::input
-            | Rule::output
-            | Rule::statement
-            | Rule::expression
-            | Rule::test => unreachable!(),
-        }
+            let method_call = MethodCall::parser(base.clone())
+                .map(|(method_call, _)| Expression::MethodCall(Box::new(method_call)))
+                .map_with(|expr, e| (expr, e.span()));
+
+            choice((method_call, base))
+        })
     }
 
-    fn eval(&self, _opts: &TescOptions, _env: &mut Environment) -> Result<Value, TestError> {
-        match &self.kind {
-            ExpressionKind::Block(block) => block.eval(_opts, _env),
-            ExpressionKind::FunctionCall(function_call) => function_call.eval(_opts, _env),
-            ExpressionKind::Builtin(builtin) => builtin.eval(_opts, _env),
-            ExpressionKind::StringLiteral(string) => string.eval(_opts, _env),
+    pub fn eval(&self, _opts: &TescOptions, _env: &mut Environment) -> Result<Value, TestError> {
+        match &self {
+            Expression::Block(block) => block.eval(_opts, _env),
+            Expression::MethodCall(method_call) => method_call.eval(_opts, _env),
+            // ExpressionKind::Builtin(builtin) => builtin.eval(_opts, _env),
+            Expression::Ident(ident) => ident.eval(_opts, _env),
+            Expression::StringLiteral(string) => string.eval(_opts, _env),
         }
     }
 }

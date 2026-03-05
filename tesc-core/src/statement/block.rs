@@ -1,53 +1,52 @@
-use pest::iterators::Pair;
+use chumsky::{input::ValueInput, prelude::*, Parser};
 
 use crate::{
     environment::Environment,
-    parser::Rule,
-    statement::{expression::Expression, Statement, Value},
+    lexer::Token,
+    statement::{expression::Expression, Instruction, ParserExtra, Spanned, Statement, Value},
     test_error::TestError,
     TescOptions,
 };
 
-pub type Block = Vec<BlockItem>;
-
 #[derive(Clone, Debug)]
-pub enum BlockItem {
-    Statement(Statement),
-    Expression(Expression),
+pub struct Block {
+    body: Vec<Statement>,
+    tail: Option<Expression>,
 }
 
-impl super::Instruction for Block {
-    fn parse(pair: Pair<Rule>) -> Self {
-        let mut block = Block::new();
-        for inner in pair.into_inner() {
-            block.push(BlockItem::parse(inner));
-        }
-        block
+impl Block {
+    pub fn parser<'tokens, 'src: 'tokens, I>(
+        stmt: impl Parser<'tokens, I, Spanned<Statement>, ParserExtra<'tokens, 'src>> + Clone,
+        expr: impl Parser<'tokens, I, Spanned<Expression>, ParserExtra<'tokens, 'src>> + Clone,
+    ) -> impl Parser<'tokens, I, Spanned<Self>, ParserExtra<'tokens, 'src>> + Clone
+    where
+        Self: std::marker::Sized,
+        I: ValueInput<'tokens, Token = Token<'src>, Span = SimpleSpan>,
+    {
+        just(Token::OpenCurly)
+            .ignore_then(stmt.repeated().collect::<Vec<_>>())
+            .then(expr.or_not())
+            .then_ignore(just(Token::CloseCurly))
+            .map(|(body, tail)| Block {
+                body: body.into_iter().map(|(s, _)| s).collect::<Vec<_>>(),
+                tail: if let Some((tail, _)) = tail {
+                    Some(tail)
+                } else {
+                    None
+                },
+            })
+            .map_with(|block, e| (block, e.span()))
     }
 
-    fn eval(&self, _opts: &TescOptions, _env: &mut Environment) -> Result<Value, TestError> {
-        let mut result = Value::Void;
-        for item in self {
-            result = item.eval(_opts, _env)?;
+    pub fn eval(&self, _opts: &TescOptions, env: &mut Environment) -> Result<Value, TestError> {
+        env.push_frame();
+        for stmt in &self.body {
+            stmt.eval(_opts, env)?;
         }
-        Ok(result)
-    }
-}
-
-impl super::Instruction for BlockItem {
-    fn parse(pair: Pair<Rule>) -> Self {
-        match pair.as_rule() {
-            Rule::statement => BlockItem::Statement(Statement::parse(pair)),
-            Rule::expression => BlockItem::Expression(Expression::parse(pair)),
-
-            _ => unreachable!(),
-        }
-    }
-
-    fn eval(&self, _opts: &TescOptions, _env: &mut Environment) -> Result<Value, TestError> {
-        match self {
-            BlockItem::Statement(statement) => statement.eval(_opts, _env),
-            BlockItem::Expression(expression) => expression.eval(_opts, _env),
+        if let Some(expr) = &self.tail {
+            expr.eval(_opts, env)
+        } else {
+            Ok(Value::Void)
         }
     }
 }
