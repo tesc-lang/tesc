@@ -6,9 +6,10 @@ use crate::{
 
 use super::{ParserExtra, Spanned};
 
-pub type StringLiteral = String;
+#[derive(Clone, Debug)]
+pub struct Ident(pub String);
 
-impl super::Instruction for StringLiteral {
+impl super::Instruction for Ident {
     fn parser<'tokens, 'src: 'tokens, I>(
     ) -> impl Parser<'tokens, I, Spanned<Self>, ParserExtra<'tokens, 'src>> + Clone
     where
@@ -19,10 +20,13 @@ impl super::Instruction for StringLiteral {
             Span = chumsky::prelude::SimpleSpan,
         >,
     {
-        select! { Token::String(string) => string.to_string() }
-            .map_with(|string, e| (string, e.span()))
+        select! { Token::Ident(ident) => ident.to_string() }
+            .map_with(|ident, e| (Ident(ident), e.span()))
     }
-    fn eval(&self, _opts: &TescOptions, _env: &mut Environment) -> Result<Value, TestError> {
-        Ok(Value::String(self.clone()))
+    fn eval(&self, _opts: &TescOptions, env: &mut Environment) -> Result<Value, TestError> {
+        match env.get(&self.0) {
+            Some(v) => Ok(Value::Reference(v)),
+            None => Err(TestError::UndefinedIdentifier(self.0.clone())),
+        }
     }
 }

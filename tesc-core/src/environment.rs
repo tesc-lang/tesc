@@ -1,17 +1,12 @@
-use std::{
-    io::{Read, Write},
-    process::Stdio,
-};
+use std::{cell::RefCell, collections::HashMap, process::Stdio, rc::Rc};
 
-pub struct Frame(Vec<Item>);
+use crate::statement::Value;
 
-#[derive(Clone, Debug)]
-pub enum Item {}
+pub type Frame = HashMap<String, Rc<RefCell<Value>>>;
 
 pub struct Environment {
-    pub test: Option<String>,
-    pub child: Option<std::process::Child>,
-    _stack: Vec<Frame>,
+    // TODO: Spaghetti stack
+    stack: Vec<Frame>,
 }
 
 impl Default for Environment {
@@ -22,51 +17,41 @@ impl Default for Environment {
 
 impl Environment {
     pub fn new() -> Self {
-        Self {
-            test: None,
-            child: None,
-            _stack: Vec::new(),
-        }
+        Self { stack: Vec::new() }
     }
 
-    pub fn spawn(&mut self, command: String) {
+    pub fn push_frame(&mut self) {
+        self.stack.push(Frame::new());
+    }
+
+    pub fn pop_frame(&mut self) {
+        self.stack.pop().unwrap();
+    }
+
+    pub fn get(&mut self, ident: &String) -> Option<Rc<RefCell<Value>>> {
+        for frame in self.stack.iter().rev() {
+            if let Some(value) = frame.get(ident) {
+                return Some(value.clone());
+            }
+        }
+        None
+    }
+
+    pub fn spawn(&mut self, name: String, command: String) {
         let mut split = command.split(' ');
         let command = split.next().unwrap();
         let args = split.collect::<Vec<_>>();
-        self.child = Some(
-            std::process::Command::new(command)
-                .args(args)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap(),
+        self.stack.last_mut().unwrap().insert(
+            name,
+            Rc::new(RefCell::new(Value::Process(
+                std::process::Command::new(command)
+                    .args(args)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap(),
+            ))),
         );
-    }
-
-    pub fn kill_child(&mut self) {
-        self.child.take().unwrap().kill().unwrap();
-    }
-
-    pub fn send_to_child(&mut self, bytes: &[u8]) {
-        self.child
-            .as_ref()
-            .unwrap()
-            .stdin
-            .as_ref()
-            .unwrap()
-            .write_all(bytes)
-            .unwrap();
-    }
-
-    pub fn recieve_from_child(&mut self, buf: &mut String) {
-        self.child
-            .as_mut()
-            .unwrap()
-            .stdout
-            .as_mut()
-            .unwrap()
-            .read_to_string(buf)
-            .unwrap();
     }
 }

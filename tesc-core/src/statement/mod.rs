@@ -1,90 +1,80 @@
-use pest::iterators::Pair;
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    environment::Environment, parser::Rule, statement::test::Test, test_error::TestError,
+    environment::Environment, lexer::Token, statement::test::Test, test_error::TestError,
     TescOptions,
 };
+
+use chumsky::{input::ValueInput, prelude::*};
+
+pub type ParserExtra<'tokens, 'src> = extra::Err<Rich<'tokens, Token<'src>>>;
+pub type Spanned<T> = (T, SimpleSpan);
+
+pub mod module;
 
 mod expression;
 use expression::Expression;
 
 pub mod test;
 
+// mod builtin;
 mod block;
-use block::Block;
 
-mod builtin;
+// mod function_call;
+mod method_call;
 
-mod function_call;
-
+mod ident;
 mod string_literal;
 
 #[derive(Clone, Debug)]
-pub struct Statement {
-    pub kind: StatementKind,
-}
-
-#[derive(Clone, Debug)]
-pub enum StatementKind {
+pub enum Statement {
     Test(Test),
     Expression(Expression),
-    Block(Block),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum Value {
     String(String),
 
+    Process(std::process::Child),
+
+    Reference(Rc<RefCell<Value>>),
     Void,
 }
 
-pub trait Instruction
-where
-    Self: std::marker::Sized,
-{
-    fn parse(pair: Pair<Rule>) -> Self;
+pub trait Instruction {
+    fn parser<'tokens, 'src: 'tokens, I>(
+    ) -> impl Parser<'tokens, I, Spanned<Self>, ParserExtra<'tokens, 'src>> + Clone
+    where
+        Self: std::marker::Sized,
+        I: ValueInput<'tokens, Token = Token<'src>, Span = SimpleSpan>;
+
     // fn check(&self, type_checker: &mut TypeChecker) -> Result<Type, TypeCheckError>;
     fn eval(&self, opts: &TescOptions, env: &mut Environment) -> Result<Value, TestError>;
 }
 
 impl Instruction for Statement {
-    fn parse(pair: Pair<Rule>) -> Self {
-        let pair = pair.into_inner().next().unwrap();
-        match pair.as_rule() {
-            Rule::test => Statement {
-                kind: StatementKind::Test(Test::parse(pair)),
-            },
+    fn parser<'tokens, 'src: 'tokens, I>(
+    ) -> impl Parser<'tokens, I, Spanned<Self>, ParserExtra<'tokens, 'src>> + Clone
+    where
+        Self: std::marker::Sized,
+        I: ValueInput<'tokens, Token = Token<'src>, Span = SimpleSpan>,
+    {
+        recursive(|stmt| {
+            let test = Test::parser(stmt.clone()).map(|(test, _)| Statement::Test(test));
+            let expression = Expression::parser(stmt)
+                .then_ignore(just(Token::Semicolon))
+                .map(|(expr, _)| Statement::Expression(expr));
 
-            Rule::block => Statement {
-                kind: StatementKind::Block(Block::parse(pair)),
-            },
-
-            Rule::expression => Statement {
-                kind: StatementKind::Expression(Expression::parse(pair)),
-            },
-
-            Rule::module
-            | Rule::EOI
-            | Rule::WHITESPACE
-            | Rule::alpha
-            | Rule::digit
-            | Rule::ident
-            | Rule::arguments
-            | Rule::input
-            | Rule::output
-            | Rule::statement
-            | Rule::function_call
-            | Rule::builtin
-            | Rule::string_literal => unreachable!(),
-        }
+            choice((test, expression)).map_with(|stmt, e| (stmt, e.span()))
+        })
     }
 
     fn eval(&self, _opts: &TescOptions, _env: &mut Environment) -> Result<Value, TestError> {
-        match &self.kind {
-            StatementKind::Test(test) => test.eval(_opts, _env),
-
-            StatementKind::Block(block) => block.eval(_opts, _env),
-            StatementKind::Expression(expression) => expression.eval(_opts, _env),
+        match &self {
+            Statement::Test(test) => test.eval(_opts, _env),
+            // StatementKind::Block(block) => block.eval(_opts, _env),
+            Statement::Expression(expression) => expression.eval(_opts, _env),
         }?;
         Ok(Value::Void)
     }

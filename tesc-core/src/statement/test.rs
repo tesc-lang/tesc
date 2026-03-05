@@ -1,9 +1,12 @@
-use pest::iterators::Pair;
+use chumsky::input::ValueInput;
+use chumsky::prelude::*;
+use chumsky::Parser;
 
+use crate::statement::expression::Expression;
 use crate::{
     environment::Environment,
-    parser::Rule,
-    statement::{expression::Expression, Instruction, Statement, Value},
+    lexer::Token,
+    statement::{Instruction, ParserExtra, Spanned, Statement, Value},
     test_error::TestError,
     TescOptions,
 };
@@ -11,32 +14,49 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Test {
     name: String,
-    command: Box<Expression>,
+    command: Expression,
     body: Box<Statement>,
 }
 
-impl Instruction for Test {
-    fn parse(pair: Pair<Rule>) -> Self {
-        let mut inner = pair.into_inner();
-        let name = inner.next().unwrap().as_str().to_string();
-        let command = Box::new(Expression::parse(inner.next().unwrap()));
-        let body = Box::new(Statement::parse(inner.next().unwrap()));
-        Test {
-            name,
-            command,
-            body,
-        }
+impl Test {
+    pub fn parser<'tokens, 'src: 'tokens, I>(
+        stmt: impl Parser<'tokens, I, Spanned<Statement>, ParserExtra<'tokens, 'src>> + Clone + 'tokens,
+    ) -> impl Parser<'tokens, I, Spanned<Self>, ParserExtra<'tokens, 'src>> + Clone
+    where
+        Self: std::marker::Sized,
+        I: ValueInput<'tokens, Token = Token<'src>, Span = SimpleSpan>,
+    {
+        let ident = select! { Token::Ident(ident) => ident };
+        let expr = Expression::parser(stmt.clone());
+
+        just(Token::Keyword("test"))
+            .ignore_then(ident)
+            .then_ignore(just(Token::OpenParen))
+            .then(expr)
+            .then_ignore(just(Token::CloseParen).ignored())
+            .then(stmt)
+            .map_with(move |((name, (command, _)), (body, _)), e| {
+                (
+                    Test {
+                        name: name.to_string(),
+                        command,
+                        body: Box::new(body),
+                    },
+                    e.span(),
+                )
+            })
     }
 
-    fn eval(&self, opts: &TescOptions, env: &mut Environment) -> Result<Value, TestError> {
+    pub fn eval(&self, opts: &TescOptions, env: &mut Environment) -> Result<Value, TestError> {
         println!("Testing: {}", self.name);
+        env.push_frame();
+
         if let Value::String(command) = self.command.eval(opts, env)? {
-            env.test = Some(self.name.clone());
-            env.spawn(command);
+            env.spawn("self".to_string(), command);
         }
 
         let result = (*self.body).eval(opts, env);
-        env.kill_child();
+        env.pop_frame();
         result
     }
 }
