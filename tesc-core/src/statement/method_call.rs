@@ -1,25 +1,31 @@
 use std::io::{BufRead, Write};
 
-use chumsky::Parser;
+use chumsky::{span::SimpleSpan, Parser};
 
 use crate::{
-    environment::Environment,
-    statement::{expression::Expression, ident::Ident, Instruction, ParserExtra, Spanned, Value},
-    test_error::TestError,
-    TescOptions,
+    environment::{RunTimeEnv, TypeCheckEnv},
+    error::{expect, RunTimeErr, RunTimeErrKind, TypeCheckErr, TypeCheckErrKind},
+    statement::{
+        expression::{Expression, ExpressionKind},
+        ident::Ident,
+        Instruction, ParserExtra, Value,
+    },
+    types::Type,
+    TescArgs,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MethodCall {
     receiver: Expression,
     method: Ident,
     argument: Expression,
+    span: SimpleSpan,
 }
 
 impl MethodCall {
     pub fn parser<'tokens, 'src: 'tokens, I>(
-        expr: impl Parser<'tokens, I, Spanned<Expression>, ParserExtra<'tokens, 'src>> + Clone + 'tokens,
-    ) -> impl Parser<'tokens, I, Spanned<Self>, ParserExtra<'tokens, 'src>> + Clone
+        expr: impl Parser<'tokens, I, Expression, ParserExtra<'tokens, 'src>> + Clone + 'tokens,
+    ) -> impl Parser<'tokens, I, Expression, ParserExtra<'tokens, 'src>> + Clone
     where
         Self: std::marker::Sized,
         I: chumsky::input::ValueInput<
@@ -28,33 +34,61 @@ impl MethodCall {
             Span = chumsky::prelude::SimpleSpan,
         >,
     {
-        expr.clone()
-            .then(Ident::parser())
-            .then(expr)
-            .map(|(((receiver, _), (method, _)), (argument, _))| MethodCall {
-                receiver,
-                method,
-                argument,
-            })
-            .map_with(|expr, e| (expr, e.span()))
+        expr.clone().foldl_with(
+            Ident::parser().then(expr).repeated().at_least(1),
+            |receiver, (method, argument), e| Expression {
+                kind: ExpressionKind::MethodCall(Box::new(MethodCall {
+                    receiver,
+                    method,
+                    argument,
+                    span: e.span(),
+                })),
+                span: e.span(),
+            },
+        )
     }
 
-    pub fn eval(&self, _opts: &TescOptions, _env: &mut Environment) -> Result<Value, TestError> {
-        let receiver = self.receiver.eval(_opts, _env)?;
-        let argument = match self.argument.eval(_opts, _env) {
+    pub fn check(&self, _opts: &TescArgs, env: &mut TypeCheckEnv) -> Result<Type, TypeCheckErr> {
+        match self.receiver.check(_opts, env)? {
+            Type::Reference(r) => expect(Type::Process, *r, self.receiver.span)?,
+            t => expect(
+                Type::Reference(Box::new(Type::Process)),
+                t,
+                self.receiver.span,
+            )?,
+        };
+
+        expect(
+            Type::String,
+            self.argument.check(_opts, env)?,
+            self.argument.span,
+        )?;
+
+        match self.method.ident.as_str() {
+            "send" | "expect" => (),
+            method => Err(TypeCheckErr {
+                kind: TypeCheckErrKind::UndefinedMethod(method.to_string()),
+                span: self.method.span,
+            })?,
+        };
+
+        Ok(Type::Reference(Box::new(Type::Process)))
+    }
+
+    pub fn eval(&self, _opts: &TescArgs, env: &mut RunTimeEnv) -> Result<Value, RunTimeErr> {
+        let receiver = self.receiver.eval(_opts, env)?;
+        let argument = match self.argument.eval(_opts, env) {
             Ok(v) => match v {
                 Value::String(s) => s + "\n",
-                Value::Process(_ref_cell) => todo!(),
-                Value::Reference(_ref_cell) => todo!(),
-                Value::Void => todo!(),
+                _ => unreachable!(),
             },
             Err(_) => todo!(),
         };
 
         match receiver {
-            Value::Reference(r) => match &mut *r.borrow_mut() {
+            Value::Reference(ref r) => match &mut *r.borrow_mut() {
                 Value::String(_) => todo!(),
-                Value::Process(ref mut child) => match self.method.0.as_str() {
+                Value::Process(ref mut child) => match self.method.ident.as_str() {
                     "send" => {
                         child
                             .stdin
@@ -69,9 +103,16 @@ impl MethodCall {
                         reader.read_line(&mut buf).unwrap();
 
                         if argument.clone() != buf {
-                            return Err(TestError::OutputMissmatch {
-                                actual: buf.clone(),
-                                expected: argument,
+                            return Err(RunTimeErr {
+                                kind: RunTimeErrKind::OutputMissmatch {
+                                    actual: buf.clone(),
+                                    expected: argument.strip_suffix("\n").unwrap().to_string(),
+                                },
+                                span: SimpleSpan {
+                                    start: self.method.span.start,
+                                    end: self.argument.span.end,
+                                    context: self.span.context,
+                                },
                             });
                         }
                     }
@@ -83,6 +124,6 @@ impl MethodCall {
             _ => todo!(),
         }
 
-        Ok(Value::Void)
+        Ok(receiver)
     }
 }

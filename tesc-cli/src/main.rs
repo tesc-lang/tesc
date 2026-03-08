@@ -1,12 +1,7 @@
 use clap::Parser;
-
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Args {
-    src: String,
-}
+use tesc_core::TescArgs;
 
 fn main() {
-    let args = Args::parse();
-    tesc_core::run(args.src);
+    let args = TescArgs::parse();
+    tesc_core::run(args);
 }

@@ -1,24 +1,26 @@
 use chumsky::{input::ValueInput, prelude::*, Parser};
 
 use crate::{
-    environment::Environment,
+    environment::{RunTimeEnv, TypeCheckEnv},
+    error::{RunTimeErr, TypeCheckErr, TypeCheckErrKind},
     lexer::Token,
-    statement::{expression::Expression, Instruction, ParserExtra, Spanned, Statement, Value},
-    test_error::TestError,
-    TescOptions,
+    statement::{expression::Expression, Instruction, ParserExtra, Statement, Value},
+    types::Type,
+    TescArgs,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Block {
     body: Vec<Statement>,
     tail: Option<Expression>,
+    pub span: SimpleSpan,
 }
 
 impl Block {
     pub fn parser<'tokens, 'src: 'tokens, I>(
-        stmt: impl Parser<'tokens, I, Spanned<Statement>, ParserExtra<'tokens, 'src>> + Clone,
-        expr: impl Parser<'tokens, I, Spanned<Expression>, ParserExtra<'tokens, 'src>> + Clone,
-    ) -> impl Parser<'tokens, I, Spanned<Self>, ParserExtra<'tokens, 'src>> + Clone
+        stmt: impl Parser<'tokens, I, Statement, ParserExtra<'tokens, 'src>> + Clone,
+        expr: impl Parser<'tokens, I, Expression, ParserExtra<'tokens, 'src>> + Clone,
+    ) -> impl Parser<'tokens, I, Self, ParserExtra<'tokens, 'src>> + Clone
     where
         Self: std::marker::Sized,
         I: ValueInput<'tokens, Token = Token<'src>, Span = SimpleSpan>,
@@ -27,18 +29,46 @@ impl Block {
             .ignore_then(stmt.repeated().collect::<Vec<_>>())
             .then(expr.or_not())
             .then_ignore(just(Token::CloseCurly))
-            .map(|(body, tail)| Block {
-                body: body.into_iter().map(|(s, _)| s).collect::<Vec<_>>(),
-                tail: if let Some((tail, _)) = tail {
-                    Some(tail)
-                } else {
-                    None
-                },
+            .map_with(|(body, tail), e| Block {
+                body,
+                tail,
+                span: e.span(),
             })
-            .map_with(|block, e| (block, e.span()))
     }
 
-    pub fn eval(&self, _opts: &TescOptions, env: &mut Environment) -> Result<Value, TestError> {
+    pub fn check(&self, _opts: &TescArgs, env: &mut TypeCheckEnv) -> Result<Type, TypeCheckErr> {
+        let mut errors = Vec::new();
+        env.push_frame();
+        for stmt in &self.body {
+            match stmt.check(_opts, env) {
+                Ok(_) => (),
+                Err(e) => errors.push(e),
+            }
+        }
+        let tail = if let Some(expr) = &self.tail {
+            match expr.check(_opts, env) {
+                Ok(t) => t,
+                Err(e) => {
+                    errors.push(e);
+                    Type::Void
+                }
+            }
+        } else {
+            Type::Void
+        };
+
+        if errors.is_empty() {
+            Ok(tail)
+        } else {
+            Err(TypeCheckErr {
+                kind: TypeCheckErrKind::Multiple(errors),
+                span: self.span,
+            }
+            .flatten())
+        }
+    }
+
+    pub fn eval(&self, _opts: &TescArgs, env: &mut RunTimeEnv) -> Result<Value, RunTimeErr> {
         env.push_frame();
         for stmt in &self.body {
             stmt.eval(_opts, env)?;

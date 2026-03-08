@@ -1,6 +1,6 @@
 use chumsky::prelude::*;
 
-use crate::statement::Spanned;
+pub type Spanned<T> = (T, SimpleSpan);
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token<'src> {
@@ -17,6 +17,21 @@ pub enum Token<'src> {
     Semicolon,
 }
 
+impl<'src> std::fmt::Display for Token<'src> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::String(string) => write!(f, "\"{string}\""),
+            Token::Keyword(keyword) => write!(f, "keyword `{keyword}`"),
+            Token::Ident(ident) => write!(f, "ident `{ident}`"),
+            Token::OpenParen => write!(f, "("),
+            Token::CloseParen => write!(f, ")"),
+            Token::OpenCurly => write!(f, "{{"),
+            Token::CloseCurly => write!(f, "}}"),
+            Token::Semicolon => write!(f, ";"),
+        }
+    }
+}
+
 pub fn lexer<'src>(
 ) -> impl Parser<'src, &'src str, Vec<Spanned<Token<'src>>>, extra::Err<Rich<'src, char, SimpleSpan>>>
 {
@@ -24,7 +39,7 @@ pub fn lexer<'src>(
         .then(any().and_is(just('\n').not()).repeated())
         .padded();
 
-    let string = choice((none_of("\\\""), just("\\").ignore_then(any())))
+    let string = choice((none_of("\\\"\n"), just("\\").ignore_then(any())))
         .repeated()
         .to_slice()
         .map(|s: &str| Token::String(s))
