@@ -57,11 +57,6 @@ impl Expression {
 
             let method_call = MethodCall::parser(base.clone());
 
-            // let paren = method_call
-            //     .clone()
-            //     .or(base.clone())
-            //     .delimited_by(just(Token::OpenParen), just(Token::CloseParen));
-            //
             choice((method_call, base))
         })
     }
