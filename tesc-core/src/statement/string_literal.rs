@@ -1,16 +1,25 @@
-use chumsky::{select, Parser};
+use chumsky::{select, span::SimpleSpan, Parser};
 
 use crate::{
-    environment::Environment, lexer::Token, statement::Value, test_error::TestError, TescOptions,
+    environment::{RunTimeEnv, TypeCheckEnv},
+    error::{RunTimeErr, TypeCheckErr},
+    lexer::Token,
+    statement::{Instruction, Value},
+    types::Type,
+    TescArgs,
 };
 
-use super::{ParserExtra, Spanned};
+use super::ParserExtra;
 
-pub type StringLiteral = String;
+#[derive(Debug)]
+pub struct StringLiteral {
+    pub string: String,
+    pub span: SimpleSpan,
+}
 
-impl super::Instruction for StringLiteral {
+impl Instruction for StringLiteral {
     fn parser<'tokens, 'src: 'tokens, I>(
-    ) -> impl Parser<'tokens, I, Spanned<Self>, ParserExtra<'tokens, 'src>> + Clone
+    ) -> impl Parser<'tokens, I, Self, ParserExtra<'tokens, 'src>> + Clone
     where
         Self: std::marker::Sized,
         I: chumsky::input::ValueInput<
@@ -19,10 +28,19 @@ impl super::Instruction for StringLiteral {
             Span = chumsky::prelude::SimpleSpan,
         >,
     {
-        select! { Token::String(string) => string.to_string() }
-            .map_with(|string, e| (string, e.span()))
+        select! { Token::String(string) => string.to_string() }.map_with(|string, e| {
+            StringLiteral {
+                string,
+                span: e.span(),
+            }
+        })
     }
-    fn eval(&self, _opts: &TescOptions, _env: &mut Environment) -> Result<Value, TestError> {
-        Ok(Value::String(self.clone()))
+
+    fn check(&self, _opts: &TescArgs, _env: &mut TypeCheckEnv) -> Result<Type, TypeCheckErr> {
+        Ok(Type::String)
+    }
+
+    fn eval(&self, _opts: &TescArgs, _env: &mut RunTimeEnv) -> Result<Value, RunTimeErr> {
+        Ok(Value::String(self.string.clone()))
     }
 }

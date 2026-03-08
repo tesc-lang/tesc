@@ -1,17 +1,31 @@
-use chumsky::{select, Parser};
+use chumsky::{select, span::SimpleSpan, Parser};
 
 use crate::{
-    environment::Environment, lexer::Token, statement::Value, test_error::TestError, TescOptions,
+    environment::{RunTimeEnv, TypeCheckEnv},
+    error::{RunTimeErr, TypeCheckErr, TypeCheckErrKind},
+    lexer::Token,
+    statement::{Instruction, Value},
+    types::Type,
+    TescArgs,
 };
 
-use super::{ParserExtra, Spanned};
+use super::ParserExtra;
 
 #[derive(Clone, Debug)]
-pub struct Ident(pub String);
+pub struct Ident {
+    pub span: SimpleSpan,
+    pub ident: String,
+}
 
-impl super::Instruction for Ident {
+impl std::fmt::Display for Ident {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.ident)
+    }
+}
+
+impl Instruction for Ident {
     fn parser<'tokens, 'src: 'tokens, I>(
-    ) -> impl Parser<'tokens, I, Spanned<Self>, ParserExtra<'tokens, 'src>> + Clone
+    ) -> impl Parser<'tokens, I, Self, ParserExtra<'tokens, 'src>> + Clone
     where
         Self: std::marker::Sized,
         I: chumsky::input::ValueInput<
@@ -20,13 +34,26 @@ impl super::Instruction for Ident {
             Span = chumsky::prelude::SimpleSpan,
         >,
     {
-        select! { Token::Ident(ident) => ident.to_string() }
-            .map_with(|ident, e| (Ident(ident), e.span()))
+        select! { Token::Ident(ident) => ident.to_string() }.map_with(|ident, e| Ident {
+            ident,
+            span: e.span(),
+        })
     }
-    fn eval(&self, _opts: &TescOptions, env: &mut Environment) -> Result<Value, TestError> {
-        match env.get(&self.0) {
+
+    fn check(&self, _opts: &TescArgs, env: &mut TypeCheckEnv) -> Result<Type, TypeCheckErr> {
+        match env.get(&self.ident) {
+            Some(v) => Ok(Type::Reference(Box::new(v))),
+            None => Err(TypeCheckErr {
+                span: self.span,
+                kind: TypeCheckErrKind::UndefinedIdentifier(self.ident.clone()),
+            }),
+        }
+    }
+
+    fn eval(&self, _opts: &TescArgs, env: &mut RunTimeEnv) -> Result<Value, RunTimeErr> {
+        match env.get(&self.ident) {
             Some(v) => Ok(Value::Reference(v)),
-            None => Err(TestError::UndefinedIdentifier(self.0.clone())),
+            None => unreachable!(),
         }
     }
 }

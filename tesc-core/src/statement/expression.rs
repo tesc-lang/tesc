@@ -4,21 +4,26 @@ use chumsky::{
 };
 
 use crate::{
-    environment::Environment,
+    environment::{RunTimeEnv, TypeCheckEnv},
+    error::{RunTimeErr, TypeCheckErr},
     lexer::Token,
     statement::{
         block::Block, ident::Ident, method_call::MethodCall, string_literal::StringLiteral,
-        Instruction, ParserExtra, Spanned, Statement, Value,
+        Instruction, ParserExtra, Statement, Value,
     },
-    test_error::TestError,
-    TescOptions,
+    types::Type,
+    TescArgs,
 };
 
-#[derive(Clone, Debug)]
-pub enum Expression {
+#[derive(Debug)]
+pub struct Expression {
+    pub kind: ExpressionKind,
+    pub span: SimpleSpan,
+}
+
+#[derive(Debug)]
+pub enum ExpressionKind {
     Block(Box<Block>),
-    // FunctionCall(FunctionCall),
-    // Builtin(Builtin),
     MethodCall(Box<MethodCall>),
 
     Ident(Ident),
@@ -27,37 +32,50 @@ pub enum Expression {
 
 impl Expression {
     pub fn parser<'tokens, 'src: 'tokens, I>(
-        stmt: impl Parser<'tokens, I, Spanned<Statement>, ParserExtra<'tokens, 'src>> + Clone + 'tokens,
-    ) -> impl Parser<'tokens, I, Spanned<Self>, ParserExtra<'tokens, 'src>> + Clone
+        stmt: impl Parser<'tokens, I, Statement, ParserExtra<'tokens, 'src>> + Clone + 'tokens,
+    ) -> impl Parser<'tokens, I, Self, ParserExtra<'tokens, 'src>> + Clone
     where
         Self: std::marker::Sized,
         I: ValueInput<'tokens, Token = Token<'src>, Span = SimpleSpan>,
     {
         recursive(|expr| {
-            let string =
-                StringLiteral::parser().map(|(string, _)| Expression::StringLiteral(string));
-            let ident = Ident::parser().map(|(ident, _)| Expression::Ident(ident));
+            let string = StringLiteral::parser().map_with(|s, e| Expression {
+                kind: ExpressionKind::StringLiteral(s),
+                span: e.span(),
+            });
+            let ident = Ident::parser().map_with(|ident, e| Expression {
+                kind: ExpressionKind::Ident(ident),
+                span: e.span(),
+            });
 
-            let block = Block::parser(stmt, expr.clone())
-                .map(|(block, _)| Expression::Block(Box::new(block)));
+            let block = Block::parser(stmt, expr.clone()).map_with(|block, e| Expression {
+                kind: ExpressionKind::Block(Box::new(block)),
+                span: e.span(),
+            });
 
-            let base = choice((string, ident, block)).map_with(|expr, e| (expr, e.span()));
+            let base = choice((string, ident, block));
 
-            let method_call = MethodCall::parser(base.clone())
-                .map(|(method_call, _)| Expression::MethodCall(Box::new(method_call)))
-                .map_with(|expr, e| (expr, e.span()));
+            let method_call = MethodCall::parser(base.clone());
 
             choice((method_call, base))
         })
     }
 
-    pub fn eval(&self, _opts: &TescOptions, _env: &mut Environment) -> Result<Value, TestError> {
-        match &self {
-            Expression::Block(block) => block.eval(_opts, _env),
-            Expression::MethodCall(method_call) => method_call.eval(_opts, _env),
-            // ExpressionKind::Builtin(builtin) => builtin.eval(_opts, _env),
-            Expression::Ident(ident) => ident.eval(_opts, _env),
-            Expression::StringLiteral(string) => string.eval(_opts, _env),
+    pub fn check(&self, _opts: &TescArgs, _env: &mut TypeCheckEnv) -> Result<Type, TypeCheckErr> {
+        match &self.kind {
+            ExpressionKind::Block(block) => block.check(_opts, _env),
+            ExpressionKind::MethodCall(method_call) => method_call.check(_opts, _env),
+            ExpressionKind::Ident(ident) => ident.check(_opts, _env),
+            ExpressionKind::StringLiteral(string) => string.check(_opts, _env),
+        }
+    }
+
+    pub fn eval(&self, _opts: &TescArgs, _env: &mut RunTimeEnv) -> Result<Value, RunTimeErr> {
+        match &self.kind {
+            ExpressionKind::Block(block) => block.eval(_opts, _env),
+            ExpressionKind::MethodCall(method_call) => method_call.eval(_opts, _env),
+            ExpressionKind::Ident(ident) => ident.eval(_opts, _env),
+            ExpressionKind::StringLiteral(string) => string.eval(_opts, _env),
         }
     }
 }
