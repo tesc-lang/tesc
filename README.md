@@ -1,5 +1,5 @@
 # TESC
-A programming language for writing cli tests.
+A programming language for writing CLI tests.
 
 ## Installation
 `git clone` -> `cargo install --path tesc-cli`
@@ -17,5 +17,14 @@ Please note that all statements end in `;`, even blocks.
 test add("python3 calculator.py") {
     self send "1 + 1"; // Inputs 1 + 1 + '\n' into the program
     self expect "2";   // Expects the program to print 2 + '\n'
+};
+
+test sub("python3 calculator.py") {
+    self.send("1 - 1");
+    self.expect("0");
+};
+
+test chain("python3 calculator.py") {
+    self.send("1 - 1").expect("0");
 };
 ```
