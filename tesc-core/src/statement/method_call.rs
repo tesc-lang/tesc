@@ -1,10 +1,11 @@
 use std::io::{BufRead, Write};
 
-use chumsky::{span::SimpleSpan, Parser};
+use chumsky::prelude::*;
 
 use crate::{
     environment::{RunTimeEnv, TypeCheckEnv},
     error::{expect, RunTimeErr, RunTimeErrKind, TypeCheckErr, TypeCheckErrKind},
+    lexer::Token,
     statement::{
         expression::{Expression, ExpressionKind},
         ident::Ident,
@@ -18,7 +19,7 @@ use crate::{
 pub struct MethodCall {
     receiver: Expression,
     method: Ident,
-    argument: Expression,
+    arguments: Vec<Expression>,
     span: SimpleSpan,
 }
 
@@ -34,18 +35,32 @@ impl MethodCall {
             Span = chumsky::prelude::SimpleSpan,
         >,
     {
-        expr.clone().foldl_with(
-            Ident::parser().then(expr).repeated().at_least(1),
-            |receiver, (method, argument), e| Expression {
-                kind: ExpressionKind::MethodCall(Box::new(MethodCall {
-                    receiver,
-                    method,
-                    argument,
+        let infix = Ident::parser().then(expr.clone().map(|e| vec![e]));
+
+        let items = expr
+            .clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>();
+
+        let dot = just(Token::Dot)
+            .ignore_then(Ident::parser())
+            .then(items.delimited_by(just(Token::OpenParen), just(Token::CloseParen)));
+
+        expr.clone()
+            .foldl_with(
+                dot.or(infix).repeated().at_least(1),
+                |receiver, (method, arguments), e| Expression {
+                    kind: ExpressionKind::MethodCall(Box::new(MethodCall {
+                        receiver,
+                        method,
+                        arguments,
+                        span: e.span(),
+                    })),
                     span: e.span(),
-                })),
-                span: e.span(),
-            },
-        )
+                },
+            )
+            .boxed()
     }
 
     pub fn check(&self, _opts: &TescArgs, env: &mut TypeCheckEnv) -> Result<Type, TypeCheckErr> {
@@ -60,8 +75,8 @@ impl MethodCall {
 
         expect(
             Type::String,
-            self.argument.check(_opts, env)?,
-            self.argument.span,
+            self.arguments[0].check(_opts, env)?,
+            self.arguments[0].span,
         )?;
 
         match self.method.ident.as_str() {
@@ -77,7 +92,7 @@ impl MethodCall {
 
     pub fn eval(&self, _opts: &TescArgs, env: &mut RunTimeEnv) -> Result<Value, RunTimeErr> {
         let receiver = self.receiver.eval(_opts, env)?;
-        let argument = match self.argument.eval(_opts, env) {
+        let argument = match self.arguments.first().unwrap().eval(_opts, env) {
             Ok(v) => match v {
                 Value::String(s) => s + "\n",
                 _ => unreachable!(),
@@ -110,7 +125,7 @@ impl MethodCall {
                                 },
                                 span: SimpleSpan {
                                     start: self.method.span.start,
-                                    end: self.argument.span.end,
+                                    end: self.arguments[0].span.end,
                                     context: self.span.context,
                                 },
                             });

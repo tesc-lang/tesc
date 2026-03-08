@@ -4,9 +4,6 @@ test +("python3 calculator.py") {
 
 // Test comment
 test -("python3 calculator.py") {
-    self send "1 - 2";
-    self expect "-1";
-    self send "1 - 2";
-    self expect "-1";
-    self expect "-1";
+    self.send("1 - 2").expect("-1");
+    self.send("2 - 1").expect("1");
 };

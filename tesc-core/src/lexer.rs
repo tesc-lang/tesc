@@ -14,6 +14,8 @@ pub enum Token<'src> {
     OpenCurly,
     CloseCurly,
 
+    Dot,
+    Comma,
     Semicolon,
 }
 
@@ -21,12 +23,17 @@ impl<'src> std::fmt::Display for Token<'src> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Token::String(string) => write!(f, "\"{string}\""),
+
             Token::Keyword(keyword) => write!(f, "keyword `{keyword}`"),
             Token::Ident(ident) => write!(f, "ident `{ident}`"),
+
             Token::OpenParen => write!(f, "("),
             Token::CloseParen => write!(f, ")"),
             Token::OpenCurly => write!(f, "{{"),
             Token::CloseCurly => write!(f, "}}"),
+
+            Token::Dot => write!(f, "."),
+            Token::Comma => write!(f, ","),
             Token::Semicolon => write!(f, ";"),
         }
     }
@@ -49,13 +56,13 @@ pub fn lexer<'src>(
         .filter(|c: &char| {
             !c.is_ascii_digit()
                 && !c.is_whitespace()
-                && !matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '"' | ';')
+                && !matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '"' | '.' | ',' | ';')
         })
         .then(
             any()
                 .filter(|c: &char| {
                     !c.is_whitespace()
-                        && !matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '"' | ';')
+                        && !matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '"' | '.' | ',' | ';')
                 })
                 .repeated(),
         )
@@ -70,6 +77,8 @@ pub fn lexer<'src>(
     let open_curly = just('{').ignored().map(|()| Token::OpenCurly);
     let close_curly = just('}').ignored().map(|()| Token::CloseCurly);
 
+    let dot = just('.').ignored().map(|()| Token::Dot);
+    let comma = just(',').ignored().map(|()| Token::Comma);
     let semicolon = just(';').ignored().map(|()| Token::Semicolon);
 
     choice((
@@ -80,6 +89,8 @@ pub fn lexer<'src>(
         close_paren,
         open_curly,
         close_curly,
+        dot,
+        comma,
         semicolon,
     ))
     .map_with(|tok, e| (tok, e.span()))
